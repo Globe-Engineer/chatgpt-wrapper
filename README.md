@@ -1,4 +1,8 @@
 # Globe's ChatGPT Wrapper
+```bash
+pip install chatgpt-wrapper
+```
+
 This wrapper does 4 things on top of the `openai.ChatCompletions.create` function:
 
 1. Automatic caching
