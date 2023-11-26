@@ -8,7 +8,8 @@ from datetime import datetime
 
 import diskcache
 import openai
-from openai import OpenAIError, AsyncOpenAI
+from openai import OpenAIError, AsyncOpenAI, AsyncStream, Stream
+from openai.types.chat import ChatCompletionMessage, ChatCompletion, ChatCompletion, ChatCompletionChunk, ChatCompletionMessageParam
 
 
 logs_dir = os.path.join(os.getcwd(), '.chatgpt_history/logs')
@@ -52,12 +53,12 @@ def retry_on_exception(retries=5, initial_wait_time=1):
 
 
 @retry_on_exception()
-def complete(messages=None, model='gpt-4', temperature=0, use_cache=False, **kwargs):
+def complete(messages:list[ChatCompletionMessageParam]=None, model='gpt-4', temperature=0, use_cache=False, **kwargs):
     if use_cache:
         key = get_key(messages)
         if key in cache:
             return cache.get(key)
-    response = openai.chat.completions.create(
+    response: ChatCompletion | Stream[ChatCompletionChunk] = openai.chat.completions.create(
         messages=messages,
         model=model,
         temperature=temperature,
@@ -67,26 +68,26 @@ def complete(messages=None, model='gpt-4', temperature=0, use_cache=False, **kwa
 
 
 @retry_on_exception()
-async def acomplete(messages=None, model='gpt-4', temperature=0, use_cache=False, **kwargs):
+async def acomplete(messages:list[ChatCompletionMessageParam]=None, model='gpt-4', temperature=0, use_cache=False, **kwargs):
     if use_cache:
         key = get_key(messages)
         if key in cache:
             return cache.get(key)
     client = AsyncOpenAI()
-    response = await client.chat.completions.create(
+    response: ChatCompletion | AsyncStream[ChatCompletionChunk] = await client.chat.completions.create(
         messages=messages,
         model=model,
         temperature=temperature,
         **kwargs
     )
-    return parse_response(response, messages, **kwargs)
+    return await parse_response(response, messages, **kwargs)
 
 
-def parse_response(response, messages, **kwargs):
+async def parse_response(response: ChatCompletion | Stream[ChatCompletionChunk] | AsyncStream[ChatCompletionChunk], messages:list[ChatCompletionMessageParam], **kwargs):
     n = kwargs.get('n', 1)
     stream = kwargs.get('stream', False)
     if stream:
-        return parse_stream(response, messages, n=n)
+        return await parse_stream(response, messages, n=n)
 
     results = []
     for choice in response.choices:
@@ -109,9 +110,10 @@ def parse_response(response, messages, **kwargs):
     return output
 
 
-def parse_stream(response, messages, n=1):
+async def parse_stream(response: Stream[ChatCompletionChunk] | AsyncStream[ChatCompletionChunk], messages:list[ChatCompletionMessageParam], n=1):
     results = ['' for _ in range(n)]
-    for chunk in response:
+    chunk: ChatCompletionChunk
+    async for chunk in response:
         for choice in chunk.choices:
             if not choice.delta:
                 continue
@@ -126,33 +128,42 @@ def parse_stream(response, messages, n=1):
                 yield (text, idx)
 
     for r in results:
-        log_completion(messages + [{'role': 'assistant', 'content': r}])
+        # log_completion(messages + [{'role': 'assistant', 'content': r}])
+        log_completion(messages, r)
     cache.set(get_key(messages), results)
 
 
-def log_completion(messages):
+def log_completion(messages:list[ChatCompletionMessageParam], completionMessage: ChatCompletionMessage = None):
     timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
 
     save_path = os.path.join(logs_dir, timestamp + '.txt')
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    # import pdb; pdb.set_trace()
 
-    log = ""
-    for message in messages:
-        log += message['role'].upper() + ' ' + '-'*100 + '\n\n'
-        if 'name' in message:
-            log += f"Called function: {message['name']}("
-            if 'args' in message:
-                log += '\n'
-                for k, v in message['args'].items():
-                    log += f"\t{k}={repr(v)},\n"
-            log += ')'
-            if 'content' in message:
-                log += '\nContent:\n' + message['content']
-        elif 'function_call' in message:
-            log += f"Called function: {message['function_call'].get('name', 'UNKNOWN')}(\n"
-            log += ')'
-        else:
-            log += message["content"]
+    # first print the ChatCompletionMessageParam
+    # log = ""
+    # log += role.upper() + ' ' + '-'*100 + '\n\n'
+
+
+    # then print the result, which is the ChatCompletionMessage
+    if not isinstance(completionMessage, ChatCompletionMessage):
+        raise TypeError(f"Expected ChatCompletionMessage, got {type(completionMessage)}")
+    role = completionMessage.role
+    log += role.upper() + ' ' + '-'*100 + '\n\n'
+    if completionMessage.content:
+        log += '\nContent:\n' + completionMessage['content']
+    if completionMessage.function_call:
+        log += '\nCalled function:\n' + completionMessage.function_call
+        args = completionMessage.function_call.arguments
+        log += f'{args}\n'
+    if completionMessage.tool_calls:
+        for tool in completionMessage.tool_calls:
+            log += f'\nCalled {tool.type}:\n'
+            if tool.type == 'function':
+                log += f'{tool.function.name}({tool.function.arguments}) id={tool.id}\n'
+            else:
+                raise NotImplementedError(f"Tool type {tool.type} not implemented in logger")
+
         log += '\n\n'
 
     with open(save_path, 'w') as f:
