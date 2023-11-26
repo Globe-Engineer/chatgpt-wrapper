@@ -8,7 +8,7 @@ from datetime import datetime
 
 import diskcache
 import openai
-from openai.error import OpenAIError
+from openai import OpenAIError, AsyncOpenAI
 
 
 logs_dir = os.path.join(os.getcwd(), '.chatgpt_history/logs')
@@ -57,7 +57,7 @@ def complete(messages=None, model='gpt-4', temperature=0, use_cache=False, **kwa
         key = get_key(messages)
         if key in cache:
             return cache.get(key)
-    response = openai.ChatCompletion.create(
+    response = openai.chat.completions.create(
         messages=messages,
         model=model,
         temperature=temperature,
@@ -72,7 +72,8 @@ async def acomplete(messages=None, model='gpt-4', temperature=0, use_cache=False
         key = get_key(messages)
         if key in cache:
             return cache.get(key)
-    response = await openai.ChatCompletion.acreate(
+    client = AsyncOpenAI()
+    response = await client.chat.completions.create(
         messages=messages,
         model=model,
         temperature=temperature,
