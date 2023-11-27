@@ -64,6 +64,11 @@ def complete(messages:list[ChatCompletionMessageParam]=None, model='gpt-4', temp
         temperature=temperature,
         **kwargs
     )
+    stream = kwargs.get('stream', False)
+    # import pdb; pdb.set_trace()
+    if stream:
+        n = kwargs.get('n', 1)
+        return parse_stream(response, messages, n=n)
     return parse_response(response, messages, **kwargs)
 
 
@@ -80,19 +85,21 @@ async def acomplete(messages:list[ChatCompletionMessageParam]=None, model='gpt-4
         temperature=temperature,
         **kwargs
     )
+    stream = kwargs.get('stream', False)
+    if stream:
+        n = kwargs.get('n', 1)
+        return await parse_stream(response, messages, n=n)
     return await parse_response(response, messages, **kwargs)
 
 
-async def parse_response(response: ChatCompletion | Stream[ChatCompletionChunk] | AsyncStream[ChatCompletionChunk], messages:list[ChatCompletionMessageParam], **kwargs):
+def parse_response(response: ChatCompletion, messages:list[ChatCompletionMessageParam], **kwargs):
     n = kwargs.get('n', 1)
-    stream = kwargs.get('stream', False)
-    if stream:
-        return await parse_stream(response, messages, n=n)
+
 
     results = []
     for choice in response.choices:
         message = choice.message
-        if kwargs.get('functions', None) and 'function_call' in message:
+        if kwargs.get('functions', None) and message.function_call:
             name = message.function_call.name
             try:
                 args = json.loads(message.function_call.arguments)
@@ -105,7 +112,7 @@ async def parse_response(response: ChatCompletion | Stream[ChatCompletionChunk] 
             results.append(message.content)
             log_completion(messages + [message])
 
-    output =  results if n > 1 else results[0]
+    output = results if n > 1 else results[0]
     cache.set(get_key(messages), output)
     return output
 
@@ -134,11 +141,11 @@ async def parse_stream(response: Stream[ChatCompletionChunk] | AsyncStream[ChatC
 
 
 def log_completion(messages:list[ChatCompletionMessageParam], completionMessage: ChatCompletionMessage = None):
+    return
     timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
 
     save_path = os.path.join(logs_dir, timestamp + '.txt')
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    # import pdb; pdb.set_trace()
 
     # first print the ChatCompletionMessageParam
     # log = ""
