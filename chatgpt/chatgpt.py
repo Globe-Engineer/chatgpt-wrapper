@@ -88,7 +88,7 @@ async def acomplete(messages:list[ChatCompletionMessageParam]=None, model='gpt-4
     stream = kwargs.get('stream', False)
     if stream:
         n = kwargs.get('n', 1)
-        return await parse_stream(response, messages, n=n)
+        return await parse_astream(response, messages, n=n)
     return await parse_response(response, messages, **kwargs)
 
 
@@ -107,17 +107,37 @@ def parse_response(response: ChatCompletion, messages:list[ChatCompletionMessage
                 print('ERROR: OpenAI returned invalid JSON for function call arguments')
                 raise e
             results.append({'role': 'function', 'name': name, 'args': args})
-            log_completion(messages + [results[-1]])
+            log_completion(messages, results[-1])
         else:
             results.append(message.content)
-            log_completion(messages + [message])
+            log_completion(messages, None)
 
     output = results if n > 1 else results[0]
     cache.set(get_key(messages), output)
     return output
 
+def parse_stream(response: Stream[ChatCompletionChunk], messages:list[ChatCompletionMessageParam], n=1):
+    results = ['' for _ in range(n)]
+    chunk: ChatCompletionChunk
+    for chunk in response:
+        for choice in chunk.choices:
+            if not choice.delta:
+                continue
+            text = choice.delta.content
+            if not text:
+                continue
+            idx = choice.index
+            results[idx] += text
+            if n == 1:
+                yield text
+            else:
+                yield (text, idx)
 
-async def parse_stream(response: Stream[ChatCompletionChunk] | AsyncStream[ChatCompletionChunk], messages:list[ChatCompletionMessageParam], n=1):
+    for r in results:
+        log_completion(messages, r)
+    cache.set(get_key(messages), results)
+
+async def parse_astream(response: AsyncStream[ChatCompletionChunk], messages:list[ChatCompletionMessageParam], n=1):
     results = ['' for _ in range(n)]
     chunk: ChatCompletionChunk
     async for chunk in response:
@@ -135,43 +155,46 @@ async def parse_stream(response: Stream[ChatCompletionChunk] | AsyncStream[ChatC
                 yield (text, idx)
 
     for r in results:
-        # log_completion(messages + [{'role': 'assistant', 'content': r}])
         log_completion(messages, r)
     cache.set(get_key(messages), results)
 
-
-def log_completion(messages:list[ChatCompletionMessageParam], completionMessage: ChatCompletionMessage = None):
-    return
+def log_completion(messages: list[ChatCompletionMessageParam], result: ChatCompletionMessage = None):
     timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
 
     save_path = os.path.join(logs_dir, timestamp + '.txt')
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
-    # first print the ChatCompletionMessageParam
-    # log = ""
-    # log += role.upper() + ' ' + '-'*100 + '\n\n'
+    log = ""
+    for message in messages:
+        log += message['role'].upper() + ' ' + '-'*100 + '\n\n'
+        if "content" in message:
+            log += '\nContent:\n' + message['content']
+        if "function_call" in message: # TODO: remove later since function_call is deprecated
+            log += f'Call function\n:{message["function_call"]["name"]}({message["function_call"]["arguments"]})\n'
+        if "tool_calls" in message:
+            for tool in message["tool_calls"]:
+                log += f'\nCall {tool["type"]}:\n'
+                if tool["type"] == 'function':
+                    log += f'{tool["function"]["name"]}({tool["function"]["arguments"]}) id={tool["id"]}\n'
+                else:
+                    raise NotImplementedError(f'Tool type {tool["type"]} not implemented in logger')
 
 
-    # then print the result, which is the ChatCompletionMessage
-    if not isinstance(completionMessage, ChatCompletionMessage):
-        raise TypeError(f"Expected ChatCompletionMessage, got {type(completionMessage)}")
-    role = completionMessage.role
-    log += role.upper() + ' ' + '-'*100 + '\n\n'
-    if completionMessage.content:
-        log += '\nContent:\n' + completionMessage['content']
-    if completionMessage.function_call:
-        log += '\nCalled function:\n' + completionMessage.function_call
-        args = completionMessage.function_call.arguments
-        log += f'{args}\n'
-    if completionMessage.tool_calls:
-        for tool in completionMessage.tool_calls:
-            log += f'\nCalled {tool.type}:\n'
-            if tool.type == 'function':
-                log += f'{tool.function.name}({tool.function.arguments}) id={tool.id}\n'
-            else:
-                raise NotImplementedError(f"Tool type {tool.type} not implemented in logger")
+    if result:
+        log += result.role.upper() + ' ' + '-'*100 + '\n\n'
+        if result.content:
+            log += '\nContent:\n' + result['content']
+        if result.function_call:
+            log += f'Called function:\n{result.function_call.name}({result.function_call.arguments})\n'
+        if result.tool_calls:
+            for tool in result.tool_calls:
+                log += f'\nCalled {tool.type}:\n'
+                if tool.type == 'function':
+                    log += f'{tool.function.name}({tool.function.arguments}) id={tool.id}\n'
+                else:
+                    raise NotImplementedError(f"Tool type {tool.type} not implemented in logger")
 
-        log += '\n\n'
+    log += '\n\n'
 
     with open(save_path, 'w') as f:
         f.write(log)
