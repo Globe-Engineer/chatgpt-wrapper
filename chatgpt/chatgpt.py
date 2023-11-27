@@ -106,11 +106,10 @@ def parse_response(response: ChatCompletion, messages:list[ChatCompletionMessage
             except json.decoder.JSONDecodeError as e:
                 print('ERROR: OpenAI returned invalid JSON for function call arguments')
                 raise e
-            results.append({'role': 'function', 'name': name, 'args': args})
-            log_completion(messages, results[-1])
-        else:
-            results.append(message.content)
-            log_completion(messages, None)
+            # results.append({'role': 'function', 'name': name, 'args': args})
+            # log_completion(messages, results[-1])
+        results.append(message)
+        log_completion(messages, message)
 
     output = results if n > 1 else results[0]
     cache.set(get_key(messages), output)
