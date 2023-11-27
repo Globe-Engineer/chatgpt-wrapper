@@ -166,9 +166,9 @@ def log_completion(messages: list[ChatCompletionMessageParam], result: ChatCompl
 
     log = ""
     for message in messages:
-        log += message['role'].upper() + ' ' + '-'*100 + '\n\n'
+        log += message['role'].upper() + ' ' + '-'*100 + '\n'
         if "content" in message:
-            log += '\nContent:\n' + message['content']
+            log += 'Content:\n' + message['content'] + "\n"
         if "function_call" in message: # TODO: remove later since function_call is deprecated
             log += f'Call function\n:{message["function_call"]["name"]}({message["function_call"]["arguments"]})\n'
         if "tool_calls" in message:
@@ -178,12 +178,13 @@ def log_completion(messages: list[ChatCompletionMessageParam], result: ChatCompl
                     log += f'{tool["function"]["name"]}({tool["function"]["arguments"]}) id={tool["id"]}\n'
                 else:
                     raise NotImplementedError(f'Tool type {tool["type"]} not implemented in logger')
+        log += '\n\n'
 
 
     if result:
-        log += result.role.upper() + ' ' + '-'*100 + '\n\n'
+        log += result.role.upper() + ' ' + '-'*100 + '\n'
         if result.content:
-            log += '\nContent:\n' + result['content']
+            log += 'Content:\n' + result['content']
         if result.function_call:
             log += f'Called function:\n{result.function_call.name}({result.function_call.arguments})\n'
         if result.tool_calls:
